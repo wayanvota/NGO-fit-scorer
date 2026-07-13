@@ -375,8 +375,8 @@ function App() {
   const loadConfig = () => api("/api/config").then((c) => {
     setConfig(c);
     document.title = c.org.tool_name || "Funding Fit Scorer";
-    if (c.org.brand_color) document.documentElement.style.setProperty("--brand", c.org.brand_color);
-    if (c.org.brand_color_dark) document.documentElement.style.setProperty("--brand-dark", c.org.brand_color_dark);
+    // brand_color drives the single accent (progress bars, brand mark, active nav).
+    if (c.org.brand_color) document.documentElement.style.setProperty("--accent", c.org.brand_color);
   }).catch(() => setConfig({ org: { tool_name: "Funding Fit Scorer", tagline: "" }, user: null }));
 
   const loadLabels = () => api("/api/profile/active").then((p) => {
