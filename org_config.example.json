@@ -1,0 +1,9 @@
+{
+  "org_name": "Your Organization",
+  "tool_name": "Funding Fit Scorer",
+  "tagline": "Score funding opportunities against our strategy.",
+  "brand_color": "#0f766e",
+  "brand_color_dark": "#115e59",
+  "currency": "USD",
+  "notes": "Copy this file to org_config.json and edit it. org_config.json is git-ignored so your organization's identity does not get committed to the template. Only branding lives here; your scoring strategy lives in the Strategy Profile (see PROFILE_GUIDE.md)."
+}

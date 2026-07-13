@@ -1,0 +1,21 @@
+# Secrets and org identity - never commit
+.env
+*.env
+!.env.example
+org_config.json
+
+# Local database
+*.db
+*.sqlite3
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
