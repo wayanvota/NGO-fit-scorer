@@ -13,6 +13,33 @@ async function api(path, opts = {}) {
 
 const tierClass = (t) => "tier-" + (t || "").replace(/\s+/g, "");
 
+function safeMemoHtml(markdown) {
+  const allowedTags = new Set(["A", "BLOCKQUOTE", "BR", "CODE", "EM", "H1", "H2", "H3", "HR", "LI", "OL", "P", "PRE", "STRONG", "UL"]);
+  const template = document.createElement("template");
+  template.innerHTML = marked.parse(markdown || "");
+  template.content.querySelectorAll("*").forEach((node) => {
+    if (!allowedTags.has(node.tagName)) {
+      node.replaceWith(document.createTextNode(node.textContent || ""));
+      return;
+    }
+    [...node.attributes].forEach((attribute) => {
+      if (node.tagName !== "A" || !["href", "title"].includes(attribute.name)) {
+        node.removeAttribute(attribute.name);
+      }
+    });
+    if (node.tagName === "A" && node.hasAttribute("href")) {
+      try {
+        const target = new URL(node.getAttribute("href"), window.location.origin);
+        if (!["http:", "https:"].includes(target.protocol)) node.removeAttribute("href");
+      } catch (error) {
+        node.removeAttribute("href");
+      }
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+  return template.innerHTML;
+}
+
 // --------------------------------------------------------------------------
 function Login({ config, onLogin }) {
   const [email, setEmail] = useState(""); const [err, setErr] = useState("");
@@ -29,8 +56,8 @@ function Login({ config, onLogin }) {
         <a className="btn" href="/api/login/google" style={{ display: "inline-block", marginTop: 12 }}>Sign in with Google</a>
       ) : config.dev_auth ? (
         <div>
-          <label>Work email (allowed domain)</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
+          <label htmlFor="login-email">Work email (allowed domain)</label>
+          <input id="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
           <div style={{ marginTop: 12 }}><button className="btn" onClick={submit}>Sign in</button></div>
           <p className="muted" style={{ marginTop: 14 }}>Dev sign-in is for local use only. Configure Google SSO for production.</p>
         </div>
@@ -81,7 +108,7 @@ function ScoreCard({ opp, labels, onChanged }) {
       <h3>Dimension breakdown</h3>
       <DimensionBars dims={s.dimension_scores} labels={labels} />
       <h3>Go / no-go memo</h3>
-      <div className="memo" dangerouslySetInnerHTML={{ __html: marked.parse(s.memo_markdown || "") }} />
+      <div className="memo" dangerouslySetInnerHTML={{ __html: safeMemoHtml(s.memo_markdown) }} />
       <FeedbackBox opp={opp} onChanged={onChanged} />
     </div>
   );
@@ -146,15 +173,15 @@ function SubmitView({ labels, onScored }) {
           <button className={mode === "url" ? "on" : ""} onClick={() => setMode("url")}>From URL</button>
           <button className={mode === "file" ? "on" : ""} onClick={() => setMode("file")}>Upload file</button>
         </div>
-        {mode === "text" && (<div><label>Opportunity text (RFP, grant call, or funder email)</label>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the full opportunity text..." /></div>)}
-        {mode === "url" && (<div><label>Opportunity URL</label>
-          <input type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://funder.org/rfp/..." /></div>)}
-        {mode === "file" && (<div><label>Upload the application page or RFP (PDF, Word, or text)</label>
-          <input type="file" accept=".pdf,.docx,.txt,.md" onChange={(e) => setFile(e.target.files[0] || null)} />
+        {mode === "text" && (<div><label htmlFor="opportunity-text">Opportunity text (RFP, grant call, or funder email)</label>
+          <textarea id="opportunity-text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the full opportunity text..." /></div>)}
+        {mode === "url" && (<div><label htmlFor="opportunity-url">Opportunity URL</label>
+          <input id="opportunity-url" type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://funder.org/rfp/..." /></div>)}
+        {mode === "file" && (<div><label htmlFor="opportunity-file">Upload the application page or RFP (PDF, Word, or text)</label>
+          <input id="opportunity-file" type="file" accept=".pdf,.docx,.txt,.md" onChange={(e) => setFile(e.target.files[0] || null)} />
           <p className="muted" style={{ marginTop: 6 }}>Print the application page to PDF and upload it. Scanned image-only PDFs won't work; the text must be selectable.</p></div>)}
-        <label>Relationship with this funder (optional)</label>
-        <select value={warmth} onChange={(e) => setWarmth(e.target.value)} style={{ maxWidth: 280 }}>
+        <label htmlFor="relationship-warmth">Relationship with this funder (optional)</label>
+        <select id="relationship-warmth" value={warmth} onChange={(e) => setWarmth(e.target.value)} style={{ maxWidth: 280 }}>
           <option value="">Not specified</option><option value="existing">Existing funder</option>
           <option value="warm_intro">Warm intro available</option><option value="cold">Cold / no relationship</option>
         </select>

@@ -7,9 +7,12 @@ org_config.json
 # Local database
 *.db
 *.sqlite3
+.data/
+test-results/e2e/
 
 # Python
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 *.pyo
