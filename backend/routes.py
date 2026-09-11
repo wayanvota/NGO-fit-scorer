@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import csv
+import http.client
+import ipaddress
 import io
+import socket
+import ssl
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -29,6 +33,8 @@ _BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
+_MAX_REDIRECTS = 5
+_MAX_REMOTE_BYTES = 2 * 1024 * 1024
 
 
 # --------------------------------------------------------------------------
@@ -54,17 +60,101 @@ def log(db: Session, actor: str, action: str, detail: Dict[str, Any]):
     db.commit()
 
 
-def fetch_url_text(url: str) -> str:
+def _resolve_public_http_url(url: str, resolver=socket.getaddrinfo):
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(400, "Enter a complete public http:// or https:// URL.")
+    if parsed.username or parsed.password:
+        raise HTTPException(400, "URLs containing credentials are not allowed.")
     try:
-        with httpx.Client(timeout=25, follow_redirects=True, headers=_BROWSER_HEADERS) as client:
-            r = client.get(url)
-            r.raise_for_status()
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, f"Could not fetch the URL: {e}. Paste the text instead.")
-    ctype = r.headers.get("content-type", "").lower()
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise HTTPException(400, "The URL contains an invalid port.") from exc
+
+    try:
+        literal = ipaddress.ip_address(parsed.hostname)
+        addresses = [str(literal)]
+    except ValueError:
+        try:
+            addresses = sorted({
+                item[4][0]
+                for item in resolver(parsed.hostname, port, type=socket.SOCK_STREAM)
+            })
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "That hostname could not be resolved.") from exc
+
+    if not addresses:
+        raise HTTPException(400, "That hostname could not be resolved.")
+    try:
+        checked = [ipaddress.ip_address(address) for address in addresses]
+    except ValueError as exc:
+        raise HTTPException(400, "That hostname returned an invalid address.") from exc
+    if any(not address.is_global for address in checked):
+        raise HTTPException(400, "Private, local, and reserved network addresses are not allowed.")
+    return parsed, addresses, port
+
+
+def validate_public_http_url(url: str, resolver=socket.getaddrinfo) -> str:
+    parsed, _, _ = _resolve_public_http_url(url, resolver)
+    return parsed.geturl()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, hostname: str, address: str, port: int):
+        super().__init__(hostname, port, timeout=25, context=ssl.create_default_context())
+        self._address = address
+
+    def connect(self):
+        sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _fetch_public_once(url: str):
+    parsed, addresses, port = _resolve_public_http_url(url)
+    address = addresses[0]
+    if parsed.scheme == "https":
+        connection = _PinnedHTTPSConnection(parsed.hostname, address, port)
+    else:
+        connection = http.client.HTTPConnection(address, port, timeout=25)
+    target = parsed.path or "/"
+    if parsed.query:
+        target = f"{target}?{parsed.query}"
+    headers = {**_BROWSER_HEADERS, "Host": parsed.netloc}
+    try:
+        connection.request("GET", target, headers=headers)
+        response = connection.getresponse()
+        body = response.read(_MAX_REMOTE_BYTES + 1)
+        if len(body) > _MAX_REMOTE_BYTES:
+            raise HTTPException(400, "The URL response is too large. Paste the text instead.")
+        return response.status, dict(response.getheaders()), body, parsed.geturl()
+    except HTTPException:
+        raise
+    except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+        raise HTTPException(400, "Could not fetch the URL. Paste the text instead.") from exc
+    finally:
+        connection.close()
+
+
+def fetch_url_text(url: str) -> str:
+    next_url = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        status, headers, body, safe_url = _fetch_public_once(next_url)
+        if status in (301, 302, 303, 307, 308):
+            location = headers.get("Location") or headers.get("location")
+            if not location:
+                raise HTTPException(400, "The URL returned an invalid redirect.")
+            next_url = urljoin(safe_url, location)
+            continue
+        if status >= 400:
+            raise HTTPException(400, "Could not fetch the URL. Paste the text instead.")
+        break
+    else:
+        raise HTTPException(400, "The URL redirected too many times.")
+
+    ctype = headers.get("Content-Type", headers.get("content-type", "")).lower()
     if not any(t in ctype for t in ("html", "text", "xml")):
         raise HTTPException(400, f"The URL returned '{ctype or 'a non-text file'}'. Paste the text instead.")
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(body.decode("utf-8", errors="replace"), "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
     text = " ".join(soup.get_text(" ").split())
