@@ -35,6 +35,7 @@ _BROWSER_HEADERS = {
 }
 _MAX_REDIRECTS = 5
 _MAX_REMOTE_BYTES = 2 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
 # --------------------------------------------------------------------------
@@ -170,8 +171,8 @@ def extract_file_text(filename: str, data: bytes) -> str:
         try:
             reader = PdfReader(io.BytesIO(data))
             text = "\n".join((page.extract_text() or "") for page in reader.pages)
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(400, f"Could not read that PDF: {e}. Paste the text instead.")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, "Could not read that PDF. Paste the text instead.") from exc
         if len(text.strip()) < 40:
             raise HTTPException(400, "That PDF has no selectable text (scanned/image-only). Paste the text.")
         return text[:20000]
@@ -180,11 +181,21 @@ def extract_file_text(filename: str, data: bytes) -> str:
         try:
             doc = Document(io.BytesIO(data))
             return "\n".join(p.text for p in doc.paragraphs)[:20000]
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(400, f"Could not read that Word file: {e}. Paste the text instead.")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, "Could not read that Word file. Paste the text instead.") from exc
     if name.endswith((".txt", ".md")):
         return data.decode("utf-8", errors="ignore")[:20000]
     raise HTTPException(400, "Unsupported file type. Upload a PDF, Word (.docx), or text file.")
+
+
+async def read_upload_limited(file: UploadFile) -> bytes:
+    data = bytearray()
+    while len(data) <= _MAX_UPLOAD_BYTES:
+        chunk = await file.read(min(1024 * 1024, _MAX_UPLOAD_BYTES + 1 - len(data)))
+        if not chunk:
+            return bytes(data)
+        data.extend(chunk)
+    raise HTTPException(413, "File larger than 15 MB. Upload a smaller file or paste the text.")
 
 
 def latest_score(db: Session, opp_id: str) -> Optional[Score]:
@@ -302,9 +313,7 @@ def submit(body: SubmitOpportunity, db: Session = Depends(get_db), user: User = 
 @router.post("/api/opportunities/upload")
 async def submit_file(file: UploadFile = File(...), warmth: str = Form(""),
                       db: Session = Depends(get_db), user: User = Depends(require_user)):
-    data = await file.read()
-    if len(data) > 15 * 1024 * 1024:
-        raise HTTPException(400, "File larger than 15 MB. Upload a smaller file or paste the text.")
+    data = await read_upload_limited(file)
     text = extract_file_text(file.filename or "", data)
     variables = {"relationship_warmth": warmth} if warmth else {}
     return run_and_store(db, user, text, "file", file.filename or "upload", variables)
@@ -369,6 +378,8 @@ class DecisionBody(BaseModel):
 @router.post("/api/opportunities/{opp_id}/decision")
 def set_decision(opp_id: str, body: DecisionBody, db: Session = Depends(get_db),
                  user: User = Depends(require_user)):
+    if not db.query(Opportunity).filter(Opportunity.id == opp_id).first():
+        raise HTTPException(404, "Opportunity not found.")
     if body.decision not in ("pursue", "watch", "pass"):
         raise HTTPException(400, "decision must be pursue, watch, or pass.")
     db.add(Decision(opportunity_id=opp_id, user_id=user.id, decision=body.decision))
@@ -386,6 +397,8 @@ class OutcomeBody(BaseModel):
 @router.post("/api/opportunities/{opp_id}/outcome")
 def set_outcome(opp_id: str, body: OutcomeBody, db: Session = Depends(get_db),
                 user: User = Depends(require_user)):
+    if not db.query(Opportunity).filter(Opportunity.id == opp_id).first():
+        raise HTTPException(404, "Opportunity not found.")
     if body.outcome not in ("won", "lost", "declined", "withdrawn"):
         raise HTTPException(400, "outcome must be won, lost, declined, or withdrawn.")
     db.add(Outcome(opportunity_id=opp_id, outcome=body.outcome, amount=body.amount,

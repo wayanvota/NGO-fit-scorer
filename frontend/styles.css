@@ -89,3 +89,15 @@ tr.clk { cursor: pointer; } tr.clk:hover { background: var(--sand); }
 .login-card { max-width: 420px; margin: 80px auto; }
 .spin { color: var(--muted); font-size: 14px; }
 code { background: var(--sand); padding: 1px 5px; border-radius: 4px; font-size: 13px; font-family: var(--mono); }
+
+@media (max-width: 600px) {
+  .topbar { padding: 12px; flex-wrap: wrap; gap: 8px; }
+  .topbar h1 { width: 100%; }
+  .topbar .spacer { display: none; }
+  .topbar .who { margin-left: auto; }
+  .wrap { margin: 16px auto; padding: 0 12px; }
+  .card { padding: 16px; }
+  .seg { display: flex; width: 100%; }
+  .seg button { flex: 1; padding: 8px 6px; white-space: normal; }
+  table { display: block; overflow-x: auto; }
+}

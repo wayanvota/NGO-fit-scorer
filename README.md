@@ -98,3 +98,23 @@ approves.
 - `backend/routes.py` - API including `/api/setup/bootstrap` and `/api/config`.
 - `frontend/app.js` - single-page UI with dynamic dimensions and a Setup screen.
 - `PROFILE_GUIDE.md` - how and why to define a sharp profile. Read it.
+
+## Automated end-to-end tests
+
+The Playwright suite starts the real FastAPI application with a temporary
+SQLite database and no Claude key, then drives the shipped browser interface in
+deterministic mock mode. It covers sign-in, scoring, history, decisions,
+recovery, permissions, mobile and keyboard use, hostile inputs, uploads, and
+public API boundaries. It never uses production data or a paid model.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest -q
+```
+
+Use `python -m pytest -q tests/test_e2e.py -k u05` for one category. Failed CI
+runs retain the server log for 14 days. Add new user workflows and trust
+boundaries as distinct categories in `tests/test_e2e.py`.
